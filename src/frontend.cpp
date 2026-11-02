@@ -286,8 +286,8 @@ class App {
         } catch(const std::exception& e) {sdBrowseError=e.what();}
     }
     void openSdFolderBrowser() {
-        navigateSdFolder(editSdRoot[0]?editSdRoot.data():prefs.dir+"/SDRoot");
-        if(!sdBrowseError.empty())navigateSdFolder(prefs.dir);
+        navigateSdFolder(editSdRoot[0]?editSdRoot.data():defaultSdRoot());
+        if(!sdBrowseError.empty())navigateSdFolder(executableDirectory());
         ImGui::OpenPopup("SD-ROM folder");
     }
     void sdFolderBrowser() {
@@ -318,7 +318,7 @@ class App {
     void applySettings() {
         try {
             Config next=edit;
-            next.sdRoot=editSdRoot[0]?editSdRoot.data():prefs.dir+"/SDRoot";
+            next.sdRoot=editSdRoot[0]?editSdRoot.data():defaultSdRoot();
             if(next.sdRoot.find_first_of("\r\n")!=std::string::npos)throw std::runtime_error("SD-ROM folder must be a single line");
             // Reject a file, unreadable location or missing parent before resetting the CPU.
             if(next.sdRoot!=machine->config.sdRoot||next.sdrom) {
@@ -339,7 +339,7 @@ class App {
         ImGui::Checkbox("SD-ROM",&edit.sdrom);ImGui::SameLine();ImGui::Checkbox("SD autorun",&edit.sdAutorun);
         ImGui::TextUnformatted("SD-ROM folder");
         ImGui::SetNextItemWidth(-155);
-        if(ImGui::InputTextWithHint("##sdroot",(prefs.dir+"/SDRoot").c_str(),editSdRoot.data(),editSdRoot.size()))settingsError.clear();
+        if(ImGui::InputTextWithHint("##sdroot",defaultSdRoot().c_str(),editSdRoot.data(),editSdRoot.size()))settingsError.clear();
         ImGui::SameLine();if(ImGui::Button("Browse..."))openSdFolderBrowser();
         ImVec2 browseMin=ImGui::GetItemRectMin(),browseMax=ImGui::GetItemRectMax();
         settingsBrowsePosition=ImVec2((browseMin.x+browseMax.x)*.5f,(browseMin.y+browseMax.y)*.5f);

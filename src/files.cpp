@@ -9,6 +9,13 @@
 #include <dirent.h>
 #ifdef _WIN32
 #include <direct.h>
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
 #else
 #include <unistd.h>
 #endif
@@ -29,6 +36,36 @@ std::string absolutePath(const std::string& path) {
 #endif
     if(!p) throw std::runtime_error("Cannot resolve path: "+path);
     std::string result(p);std::free(p);return result;
+}
+const std::string& executableDirectory() {
+    static const std::string result=[]() {
+        for(std::size_t size=1024;size<=65536;size*=2) {
+            std::vector<char> buffer(size);
+#ifdef _WIN32
+            DWORD count=GetModuleFileNameA(nullptr,buffer.data(),static_cast<DWORD>(size));
+            if(!count)throw std::runtime_error("Cannot locate emulator executable");
+#else
+            ssize_t count=readlink("/proc/self/exe",buffer.data(),size);
+            if(count<0)throw std::runtime_error("Cannot locate emulator executable");
+#endif
+            if(static_cast<std::size_t>(count)<size) {
+                std::string path(buffer.data(),static_cast<std::size_t>(count));
+#ifdef _WIN32
+                std::size_t slash=path.find_last_of("/\\");
+#else
+                std::size_t slash=path.find_last_of('/');
+#endif
+                if(slash==std::string::npos)throw std::runtime_error("Executable has no directory");
+                return path.substr(0,slash+1);
+            }
+        }
+        throw std::runtime_error("Executable path is too long");
+    }();
+    return result;
+}
+const std::string& defaultSdRoot() {
+    static const std::string result=executableDirectory()+"SDRoot";
+    return result;
 }
 std::vector<Entry> directory(const std::string& path) {
     DIR* d=opendir(path.c_str());if(!d) throw std::runtime_error("Cannot list directory: "+path);

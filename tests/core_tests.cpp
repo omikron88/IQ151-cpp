@@ -66,7 +66,11 @@ void preferences() {
     text="module 1\nunknown ignored value\nvideo 1\n";
     writeFile(p.dir+"/iq151.ini",reinterpret_cast<const uint8_t*>(text.data()),text.size());
     Preferences legacy;legacy.dir=p.dir;legacy.load();
-    require(legacy.config.main==1&&legacy.config.video==1&&legacy.sdRootFor("")==p.dir+"/SDRoot","Legacy configuration keeps default SD folder");
+    require(legacy.config.main==1&&legacy.config.video==1&&legacy.sdRootFor("")==defaultSdRoot(),"Legacy configuration uses SDRoot beside the executable");
+    p.config.sdRoot=defaultSdRoot();p.save();
+    Preferences defaults;defaults.dir=p.dir;defaults.load();
+    require(defaults.config.sdRoot.empty()&&defaults.sdRootFor("")==defaultSdRoot(),"Saving the default folder keeps it relative to the executable location");
+    require(defaults.sdRootFor("explicit SD data")=="explicit SD data","CLI SD folder still overrides default");
     auto original=readFile(p.dir+"/iq151.ini");p.config.sdRoot="bad\npath";
     rejects([&]{p.save();},"Multiline SD folder rejected");
     require(original==readFile(p.dir+"/iq151.ini"),"Invalid folder does not truncate preferences");

@@ -18,8 +18,10 @@ Python, Java, a ROM path nor an archive library is needed by the binary.
   Filesystem work is local; nothing is sent over the network at runtime.
 * `preferences.cpp`: backward-compatible line-based `iq151.ini` parsing;
   `Config::sdRoot` preserves host paths with spaces/backslashes. GUI startup uses
-  CLI `--sd-root`, then the saved path, then the default preference/portable
-  `SDRoot`. Hardware CLI overrides retain this host setting. Machine reset picks
+  CLI `--sd-root`, then the saved path, then `SDRoot` next to the executable.
+  Headless mode uses the same executable-relative default. A default path is
+  saved as an empty preference so moving the emulator also moves its default
+  folder. Hardware CLI overrides retain this host setting. Machine reset picks
   up a changed Config path. The folder browser runs in the Settings ImGui context.
 * `snapshot.cpp`: Java ISN v1 layout. Length/configuration/enum validation precedes
   state changes. Peripheral transactions, mounted files and the host SD folder

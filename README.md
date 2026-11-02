@@ -85,22 +85,25 @@ ROM a ostatní vestavěná data jsou v binárce v obou variantách. Pro provoz n
 nutné přibalovat adresář `roms` ani zdroje knihoven. Herní soubory a obrazy
 kazet/disket jsou uživatelská data, nikoli ROM, a zůstávají externí.
 
-Přepínač `--portable` ukládá nastavení, rychlý slot a výchozí `SDRoot` vedle
-binárky; tento adresář musí být zapisovatelný. Bez něj se používá uživatelský
-adresář vrácený `SDL_GetPrefPath`. Při zapnutí SD-ROM se do jeho kořene bezpečně
-vytvoří chybějící `__BLOADER.BAS`.
+Výchozí složka SD-ROM je vždy `<adresář emulátoru>/SDRoot`, i bez `--portable`
+a při spuštění z jiného pracovního adresáře. Při zapnutí SD-ROM se v ní vytvoří
+chybějící `__BLOADER.BAS`; složka proto musí být zapisovatelná.
+
+Přepínač `--portable` ukládá také nastavení a rychlý slot vedle binárky. Bez něj
+jsou tyto dva soubory v uživatelském adresáři vráceném `SDL_GetPrefPath`.
 
 V **Settings → SD-ROM folder** lze cestu napsat nebo vybrat tlačítkem **Browse...**.
 V prohlížeči vyberte adresář a potvrďte **Use this folder**; **Apply and reset**
 uloží cestu do `iq151.ini` a přepne SD-ROM na nový obsah. Změna se zachová po
-restartu. **Default** obnoví výchozí `SDRoot`. Neplatná cesta (např. soubor místo
+restartu. **Default** obnoví `<adresář emulátoru>/SDRoot`. Neplatná cesta (např. soubor místo
 adresáře) zobrazí chybu v Settings a nezmění běžící stroj. Nový adresář lze vytvořit
 zadáním cesty, pokud už existuje jeho nadřazená složka.
 
 Přepínač `--sd-root DIR` má před uloženou cestou přednost, i při použití dalších
 přepínačů hardwaru. Cesty s mezerami se ukládají celé, bez uvozovek. Například
 řádek v `iq151.ini`: `sdRoot C:\IQ151 data\SDRoot`. Headless režim nadále používá
-`--sd-root`, případně `SDRoot` v aktuálním adresáři.
+`--sd-root`, případně `<adresář emulátoru>/SDRoot`. Výchozí cesta se ukládá jako
+prázdné `sdRoot`, takže při přesunutí emulátoru dál následuje jeho umístění.
 
 ```sh
 cmake --install build-static --prefix package

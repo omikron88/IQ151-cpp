@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "iq151/preferences.hpp"
+#include "iq151/files.hpp"
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
@@ -11,7 +12,7 @@ void Preferences::load() {
         if(!line.empty()&&line.back()=='\r')line.pop_back();
         std::istringstream row(line);std::string key;int value;
         if(!(row>>key))continue;
-        if(key=="sdRoot") {std::getline(row>>std::ws,config.sdRoot);continue;}
+        if(key=="sdRoot") {std::string path;std::getline(row>>std::ws,path);config.sdRoot=path;continue;}
         if(!(row>>value))continue;
         if(key=="module"&&value>=0&&value<=3)config.main=value;
         if(key=="monitor"&&value>=10&&value<=13)config.monitor=value;
@@ -37,11 +38,11 @@ void Preferences::save() const {
      <<"\nmem64 "<<config.mem64<<"\ngrafik "<<config.grafik<<"\nsdrom "<<config.sdrom<<"\ndisc2 "<<config.disc2
      <<"\naudio "<<config.audio<<"\nsmart "<<config.smartkeyboard<<"\nsdAutorun "<<config.sdAutorun
      <<"\namosAutorun "<<config.amosAutorun<<"\nfelAutorun "<<config.felAutorun<<"\ncolor "<<color
-     <<"\nsdRoot "<<config.sdRoot<<'\n';
+     <<"\nsdRoot "<<(config.sdRoot==defaultSdRoot()?std::string():config.sdRoot)<<'\n';
     if(!f.flush())throw std::runtime_error("Cannot write preferences");
 }
 std::string Preferences::sdRootFor(const std::string& commandLineRoot) const {
     if(!commandLineRoot.empty())return commandLineRoot;
-    return config.sdRoot.empty()?dir+"/SDRoot":config.sdRoot;
+    return config.sdRoot.empty()?defaultSdRoot():config.sdRoot;
 }
 }
