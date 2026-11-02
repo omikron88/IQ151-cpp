@@ -10,10 +10,11 @@ jobs:
         static: ["OFF", "ON"]
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y cmake ninja-build libsdl2-dev
+      - run: sudo apt-get update && sudo apt-get install -y cmake ninja-build libsdl2-dev xvfb xauth
       - run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DIQ151_STATIC=${{ matrix.static }}
       - run: cmake --build build --parallel 4
       - run: ctest --test-dir build --output-on-failure
+      - run: xvfb-run -a env SDL_AUDIODRIVER=dummy ./build/iq151 --window-smoke
       - if: matrix.static == 'ON'
         run: cmake --install build --prefix package
       - if: matrix.static == 'ON'

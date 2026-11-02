@@ -1,3 +1,4 @@
+// IQ-151 local changes: scope global mouse capture/cursors to their owning SDL window.
 // dear imgui: Platform Backend for SDL2
 // This needs to be used along with a Renderer (e.g. DirectX11, OpenGL3, Vulkan..)
 // (Info: SDL2 is a cross-platform general purpose library for handling windows, inputs, graphics context creation, etc.)
@@ -450,7 +451,10 @@ bool ImGui_ImplSDL2_ProcessEvent(const SDL_Event* event)
             if (window_event == SDL_WINDOWEVENT_FOCUS_GAINED)
                 io.AddFocusEvent(true);
             else if (event->window.event == SDL_WINDOWEVENT_FOCUS_LOST)
+            {
+                bd->MouseButtonsDown = 0;
                 io.AddFocusEvent(false);
+            }
             return true;
         }
         case SDL_CONTROLLERDEVICEADDED:
@@ -630,14 +634,18 @@ static void ImGui_ImplSDL2_UpdateMouseData()
 #if SDL_HAS_CAPTURE_AND_GLOBAL_MOUSE
     // - SDL_CaptureMouse() let the OS know e.g. that our drags can extend outside of parent boundaries (we want updated position) and shouldn't trigger other operations outside.
     // - Debuggers under Linux tends to leave captured mouse on break, which may be very inconvenient, so to migitate the issue we wait until mouse has moved to begin capture.
-    bool want_capture = false;
-    for (int button_n = 0; button_n < ImGuiMouseButton_COUNT && !want_capture; button_n++)
-        if (ImGui::IsMouseDragging(button_n, 1.0f))
-            want_capture = true;
-    SDL_CaptureMouse(want_capture ? SDL_TRUE : SDL_FALSE);
-
     SDL_Window* focused_window = SDL_GetKeyboardFocus();
     const bool is_app_focused = (bd->Window == focused_window);
+    // SDL capture is global: an unfocused ImGui context must not release the
+    // capture requested by another IQ-151 tool window in the same frame.
+    if (is_app_focused)
+    {
+        bool want_capture = false;
+        for (int button_n = 0; button_n < ImGuiMouseButton_COUNT && !want_capture; button_n++)
+            if (ImGui::IsMouseDragging(button_n, 1.0f))
+                want_capture = true;
+        SDL_CaptureMouse(want_capture ? SDL_TRUE : SDL_FALSE);
+    }
 #else
     const bool is_app_focused = (SDL_GetWindowFlags(bd->Window) & SDL_WINDOW_INPUT_FOCUS) != 0; // SDL 2.0.3 and non-windowed systems: single-viewport only
 #endif
@@ -667,6 +675,12 @@ static void ImGui_ImplSDL2_UpdateMouseCursor()
         return;
     ImGui_ImplSDL2_Data* bd = ImGui_ImplSDL2_GetBackendData();
 
+    // Do not let another context overwrite the hovered window's cursor.
+    SDL_Window* cursor_window = SDL_GetMouseFocus();
+    if (!cursor_window)
+        cursor_window = SDL_GetKeyboardFocus();
+    if (cursor_window != bd->Window)
+        return;
     ImGuiMouseCursor imgui_cursor = ImGui::GetMouseCursor();
     if (io.MouseDrawCursor || imgui_cursor == ImGuiMouseCursor_None)
     {
@@ -677,7 +691,7 @@ static void ImGui_ImplSDL2_UpdateMouseCursor()
     {
         // Show OS mouse cursor
         SDL_Cursor* expected_cursor = bd->MouseCursors[imgui_cursor] ? bd->MouseCursors[imgui_cursor] : bd->MouseCursors[ImGuiMouseCursor_Arrow];
-        if (bd->MouseLastCursor != expected_cursor)
+        if (SDL_GetCursor() != expected_cursor)
         {
             SDL_SetCursor(expected_cursor); // SDL function doesn't have an early out (see #6113)
             bd->MouseLastCursor = expected_cursor;

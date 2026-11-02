@@ -4,7 +4,7 @@
 namespace iq151 {
 struct Options {
     Config config;
-    bool headless=false,smoke=false,portable=false,configExplicit=false;
+    bool headless=false,smoke=false,windowSmoke=false,portable=false,configExplicit=false;
     int frames=120,address=0,pc=-1;
     std::string input,snapshot,tape,diskA,diskB,sdRoot="SDRoot",expect,screenshot,state;
 };

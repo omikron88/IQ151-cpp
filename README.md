@@ -26,7 +26,11 @@ převzatých částí jsou v [NOTICE](NOTICE).
   rychlý slot, screenshoty PPM, nastavení a přetažení souborů do okna.
 
 Rozhraní používá SDL2 a Dear ImGui, nikoli Swing; zachovává uspořádání menu,
-lištu s původními ikonami a vlastní obraz počítače. Časování instrukcí vychází
+lištu s původními ikonami a vlastní obraz počítače. **Settings a debugger jsou
+samostatná nemodální SDL okna** s vlastní velikostí a polohou. Na Windows jsou
+vlastněná hlavním oknem, na X11 mají vazbu `WM_TRANSIENT_FOR`. Na backendech,
+kde SDL2 rodiče nepodporuje (např. Wayland), zůstávají samostatnými okny
+spravovanými aplikací. Časování instrukcí vychází
 z Java implementace; nejde o nově prokázanou taktově přesnou simulaci skutečné 8085.
 
 ## Linux
@@ -113,6 +117,13 @@ SDL archiv předem a přidejte `-DFETCHCONTENT_SOURCE_DIR_SDL2=/cesta/k/SDL`.
 | Výběr myší | Zkopírovat vybraný text |
 | Pravé tlačítko na názvu diskety | Povolit zápis / vysunout |
 
+Settings lze zavřít křížkem nebo Escape bez uložení; **Apply and reset** změny
+použije a restartuje stroj. Zavření debuggeru ukončí pouze jeho okno a zachová
+stav pauzy. Přes **Run** lze emulaci spustit a dál ovládat hlavní obrazovku,
+i když debugger zůstává otevřený. F10/F11 fungují také přímo v okně debuggeru.
+Klávesy zadávané do pomocných oken se nepřenášejí do emulovaného počítače.
+Zavření hlavního okna ukončí aplikaci i obě pomocná okna.
+
 Původní klávesnice odpovídá fyzickému US rozložení IQ; bez Shift píše velká
 písmena. Chytrá klávesnice a vložení ze schránky převádějí zadávané znaky
 včetně interpunkce. Nastavení hardwaru se aplikuje resetem. Snapshot se načítá
@@ -144,6 +155,7 @@ před uloženým nastavením. `--help` vypíše všechny možnosti.
 ./build/iq151 --headless --module basic6 --video 64 --frames 120 --save-state boot.isn
 ./build/iq151 --headless --load program.hex --pc 0x1000 --screenshot screen.ppm
 SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy ./build/iq151 --ui-smoke
+SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy ./build/iq151 --window-smoke
 ```
 
 Samostatné jádro bez SDL: `cmake -S . -B build-core -DIQ151_BUILD_GUI=OFF`.
@@ -159,7 +171,10 @@ CTest ověřuje:
   přerušení, HEX/bin, kazetové kodeky a čtení/zápis/ochranu sektorů Disk2;
 - skutečné `MLOAD`/`RUN` z CSW a SD-ROM boot, výpis adresáře, načtení/spuštění
   BASICu a uložení přes 8255;
-- vykreslení SDL okna a vykonání `PRINT` z fyzické i chytré SDL klávesnice.
+- vykreslení SDL okna a vykonání `PRINT` z fyzické i chytré SDL klávesnice;
+- samostatná okna Settings/debuggeru, jejich renderery, změnu velikosti,
+  oddělený vstup, F10/F12, Apply/reset, zavření/opětovné otevření a uvolnění
+  kontextů; test lze spustit také s X11 backendem.
 
 JDK je potřeba pouze k přegenerování referencí, nikoli pro běžné testy:
 [tests/reference](tests/reference). Linuxové testy byly spuštěny včetně

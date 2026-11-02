@@ -30,10 +30,11 @@ int main(int argc,char** argv) {
                     "  --snapshot FILE.isn --save-state FILE.isn\n"
                     "  --tape FILE.csw|FILE.wav --disk-a FILE.IQD --disk-b FILE.IQD\n"
                     "  --sd-root DIR --sdrom --sd-autorun --amos-autorun --fel-autorun\n"
-                    "  --screenshot FILE.ppm --expect TEXT --portable --ui-smoke\n";return 0;
+                    "  --screenshot FILE.ppm --expect TEXT --portable --ui-smoke --window-smoke\n";return 0;
             }
             if(a=="--headless") o.headless=true;
             else if(a=="--ui-smoke") o.smoke=true;
+            else if(a=="--window-smoke") o.smoke=o.windowSmoke=true;
             else if(a=="--portable") o.portable=true;
             else if(a=="--frames") {o.frames=number(value());if(o.frames<1||o.frames>10000000) throw std::runtime_error("Invalid frame count");}
             else if(a=="--module") {std::string v=value();if(v=="none") o.config.main=0;else if(v=="basic6") o.config.main=1;else if(v=="basicg") o.config.main=2;else if(v=="amos") o.config.main=3;else throw std::runtime_error("Unknown module");}

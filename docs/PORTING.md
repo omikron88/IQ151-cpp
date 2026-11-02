@@ -20,6 +20,15 @@ Python, Java, a ROM path nor an archive library is needed by the binary.
   state changes. Peripheral transactions and mounted files are not snapshots.
 * `frontend.cpp`: SDL window/events/audio, original icons, menus, dialogs,
   debugger, preferences and file browser. Input/focus loss releases held keys.
+* `ui_window.cpp`: independent, non-modal SDL Settings/debugger windows with
+  one SDL renderer and ImGui context/font atlas each. Events are routed by SDL
+  window ID; only the main window sends input to the IQ keyboard. Hidden tools
+  retain their geometry/editor state, and are destroyed before the main context
+  and SDL_Quit. Windows uses a Win32 owner (GWLP_HWNDPARENT); X11 uses SDL2's
+  SetWindowModalFor to set WM_TRANSIENT_FOR without disabling main-window input.
+  SDL2 drivers without parent support use application-managed independent windows.
+  Local ImGui SDL backend fixes prevent inactive contexts from releasing another
+  window's mouse capture or replacing its cursor.
 
 Video uses the original 560 x 272 bitmap, with active pixels at (20,8), displayed
 at 560 x 544. Video64 double-width control codes can skip cells. The renderer
@@ -45,7 +54,10 @@ Validation is deliberately separated:
    RAM/VRAM/PC/image and ISN round trips are checked for eight configurations.
 3. Native integration executes BASIC commands from SDL and clipboard-style
    input, CSW tape and SD-ROM. Sector I/O, sound generation, malformed inputs,
-   banking, interrupts and protection are exercised directly.
+   banking, interrupts and protection are exercised directly. The --window-smoke
+   test creates/renders/resizes both native tools, verifies input isolation and
+   single-step, applies a real Settings button click, closes/reopens both tools
+   and checks context/window cleanup without destroying the main renderer.
 4. Linux builds and tests run locally, including AddressSanitizer and UBSan.
    Windows is cross-compiled with MinGW; the PE imports contain only Windows
    system DLLs. Native MSYS2 execution is supplied as CI, not claimed as a local

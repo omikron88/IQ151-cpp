@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "iq151/app.hpp"
 #include "iq151/files.hpp"
+#include "ui_window.hpp"
 #include <SDL.h>
 #include "imgui.h"
 #include "imgui_impl_sdl2.h"
@@ -58,6 +59,9 @@ class App {
     SDL_Window* window=nullptr;
     SDL_Renderer* renderer=nullptr;
     SDL_Texture* screen=nullptr;
+    ImGuiContext* mainContext=nullptr;
+    std::unique_ptr<UiWindow> settingsWindow,debuggerWindow;
+    bool settingsFocus=false,debuggerFocus=false;
     SDL_AudioDeviceID audioDevice=0;
     std::map<std::string,SDL_Texture*> icons;
     std::unique_ptr<Machine> machine;
@@ -79,6 +83,7 @@ class App {
     char filePath[2048]{};
     bool openFilePopup=false,openErrorPopup=false;
     float speed=1;
+    ImVec2 settingsApplyPosition; // Used by the SDL interaction smoke test.
     bool hexInput(const char* label,int& value,int digits) {
         ImGui::SetNextItemWidth(float(digits*10+24));
         bool changed=ImGui::InputScalar(label,ImGuiDataType_S32,&value,nullptr,nullptr,digits==2?"%02X":"%04X",ImGuiInputTextFlags_CharsHexadecimal);
@@ -86,6 +91,34 @@ class App {
     }
     void fail(const std::exception& e) {error=e.what();openErrorPopup=true;machine->paused=true;}
     template<class F> void guarded(F f) {try {f();}catch(const std::exception& e){fail(e);}}
+    void releaseKeys() {
+        machine->cancelPaste();machine->keyboard.reset();selecting=false;
+        for(auto& key:held)key.first=-1;
+    }
+    void showSettings() {
+        if(!settings) edit=machine->config;
+        settings=true;settingsFocus=true;releaseKeys();
+    }
+    void showDebugger() {
+        debugger=true;debuggerFocus=true;machine->paused=true;
+        debugAddress=machine->cpu.getRegPC();releaseKeys();
+    }
+    void drawToolWindows() {
+        if(settings) {
+            if(!settingsWindow) settingsWindow.reset(new UiWindow(window,"IQ-151 - Settings",480,440,440,400));
+            if(settingsFocus) {settingsWindow->show();settingsFocus=false;}
+            ImGuiContextScope context(settingsWindow->context());
+            settingsWindow->begin();settingsDialog();settingsWindow->present();
+        }
+        if(!settings&&settingsWindow) settingsWindow->hide();
+        if(debugger) {
+            if(!debuggerWindow) debuggerWindow.reset(new UiWindow(window,"IQ-151 - Debugger",760,610,700,500));
+            if(debuggerFocus) {debuggerWindow->show();debuggerFocus=false;}
+            ImGuiContextScope context(debuggerWindow->context());
+            debuggerWindow->begin();debugWindow();debuggerWindow->present();
+        }
+        if(!debugger&&debuggerWindow) debuggerWindow->hide();
+    }
     void synchronizeBreakpoints() {
         auto& c=machine->cpu;c.resetBreakpoints();
         for(int i=0;i<5;++i) if(bpEnabled[i]&&breakpoints[i]>=0)c.setBreakpoint(breakpoints[i],true);
@@ -240,8 +273,8 @@ class App {
                 ImGui::EndMenu();
             }
             if(ImGui::BeginMenu("Tools")) {
-                if(ImGui::MenuItem("Debugger","F12")){debugger=true;m.paused=true;debugAddress=m.cpu.getRegPC();}
-                if(ImGui::MenuItem("Settings...")){edit=m.config;settings=true;}
+                if(ImGui::MenuItem("Debugger","F12"))showDebugger();
+                if(ImGui::MenuItem("Settings..."))showSettings();
                 if(ImGui::BeginMenu("Screen color")) {const char* colors[]={"White","Green","Amber"};for(int i=0;i<3;++i)if(ImGui::MenuItem(colors[i],nullptr,prefs.color==i))prefs.color=i;ImGui::EndMenu();}
                 if(ImGui::MenuItem("Keyboard / help"))showHelp=true;
                 if(ImGui::MenuItem("About"))about=true;
@@ -260,16 +293,15 @@ class App {
         if(iconButton("pause","Pause / continue (Ctrl+P)",m.paused?"run":"pause"))m.paused=!m.paused;ImGui::SameLine();
         if(iconButton("load","Load memory block","binaryopn"))browse(FileAction::LoadBinary);ImGui::SameLine();
         if(iconButton("save","Save memory block","binarysav"))browse(FileAction::SaveBinary);ImGui::SameLine();
-        if(iconButton("debug","Debugger (F12)","debugger")){debugger=true;m.paused=true;debugAddress=m.cpu.getRegPC();}ImGui::SameLine();
-        if(iconButton("settings","Settings","settings")){edit=m.config;settings=true;}ImGui::SameLine();
+        if(iconButton("debug","Debugger (F12)","debugger"))showDebugger();ImGui::SameLine();
+        if(iconButton("settings","Settings","settings"))showSettings();ImGui::SameLine();
         if(iconButton("loadstate","Load snapshot (F9)","osn_open"))browse(FileAction::LoadState);ImGui::SameLine();
         if(iconButton("savestate","Save snapshot (F8)","osn_save"))browse(FileAction::SaveState);ImGui::SameLine();
         if(iconButton("break","Break (F6)","nmi"))m.pic.irq(5);
     }
     void settingsDialog() {
         if(!settings)return;
-        ImGui::SetNextWindowSize(ImVec2(440,430),ImGuiCond_FirstUseEver);
-        ImGui::Begin("Settings",&settings,ImGuiWindowFlags_NoCollapse);
+        ImGui::Begin("Settings",nullptr,ImGuiWindowFlags_NoTitleBar|ImGuiWindowFlags_NoResize|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoCollapse|ImGuiWindowFlags_NoSavedSettings);
         ImGui::Combo("Main module",&edit.main,"None\0BASIC 6\0BASIC G\0AMOS\0");
         int mon=edit.monitor-10;ImGui::Combo("Monitor",&mon,"Standard\0Disassembler\0CP/M Komenium\0CP/M Felicie\0");edit.monitor=mon+10;
         ImGui::Combo("Video",&edit.video,"Video 32\0Video 64\0");
@@ -279,15 +311,16 @@ class App {
         ImGui::Checkbox("Smart keyboard (host characters)",&edit.smartkeyboard);
         ImGui::Checkbox("AMOS autorun",&edit.amosAutorun);ImGui::SameLine();ImGui::Checkbox("FEL autorun",&edit.felAutorun);
         ImGui::Separator();ImGui::TextWrapped("Apply resets the machine. ROMs are built into the executable.");
-        if(ImGui::Button("Apply and reset")) {guarded([&]{machine->config=edit;reset();prefs.config=edit;prefs.save();});settings=false;}
+        if(ImGui::Button("Apply and reset")) {guarded([&]{machine->config=edit;reset();prefs.config=edit;if(!options.smoke)prefs.save();});settings=false;}
+        ImVec2 buttonMin=ImGui::GetItemRectMin(),buttonMax=ImGui::GetItemRectMax();
+        settingsApplyPosition=ImVec2((buttonMin.x+buttonMax.x)*.5f,(buttonMin.y+buttonMax.y)*.5f);
         ImGui::SameLine();if(ImGui::Button("Cancel"))settings=false;
         ImGui::End();
     }
     void debugWindow() {
         if(!debugger)return;
         auto& m=*machine;auto& c=m.cpu;
-        ImGui::SetNextWindowSize(ImVec2(740,610),ImGuiCond_FirstUseEver);
-        ImGui::Begin("Debugger",&debugger);
+        ImGui::Begin("Debugger",nullptr,ImGuiWindowFlags_NoTitleBar|ImGuiWindowFlags_NoResize|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoCollapse|ImGuiWindowFlags_NoSavedSettings);
         if(ImGui::Button(m.paused?"Run":"Stop")) {if(m.paused)resume();else m.paused=true;}ImGui::SameLine();
         if(ImGui::Button("Step (F10)"))step();ImGui::SameLine();if(ImGui::Button("Step over (F11)"))stepOver();ImGui::SameLine();
         ImGui::Checkbox("Z80 mnemonics",&z80);
@@ -340,12 +373,12 @@ class App {
             if(code==SDL_SCANCODE_F7){reset();return;}if(code==SDL_SCANCODE_F6){m.pic.irq(5);return;}
             if(code==SDL_SCANCODE_F8){if(ctrl)quick(true);else browse(FileAction::SaveState);return;}
             if(code==SDL_SCANCODE_F9){if(ctrl)quick(false);else browse(FileAction::LoadState);return;}
-            if(code==SDL_SCANCODE_F12){debugger=!debugger;m.paused=true;debugAddress=m.cpu.getRegPC();return;}
+            if(code==SDL_SCANCODE_F12){if(debugger)debugger=false;else showDebugger();return;}
             if(debugger&&code==SDL_SCANCODE_F10){step();return;}if(debugger&&code==SDL_SCANCODE_F11){stepOver();return;}
             if(ctrl&&code==SDL_SCANCODE_P){m.paused=!m.paused;return;}
             if(ctrl&&code==SDL_SCANCODE_V){paste();return;}
         }
-        if(ImGui::GetIO().WantTextInput||!inputFocused||settings||fileAction!=FileAction::None)return;
+        if(ImGui::GetIO().WantTextInput||!inputFocused||fileAction!=FileAction::None)return;
         m.cancelPaste();
         if(code==SDL_SCANCODE_LSHIFT||code==SDL_SCANCODE_RSHIFT){m.keyboard.shift=true;return;}
         if(code==SDL_SCANCODE_LCTRL||code==SDL_SCANCODE_RCTRL){m.keyboard.ctrl=true;return;}
@@ -358,15 +391,72 @@ class App {
         }
     }
     void textEvent(const SDL_Event& e) {
-        if(!machine->config.smartkeyboard||!inputFocused||ImGui::GetIO().WantTextInput||settings||fileAction!=FileAction::None)return;
+        if(!machine->config.smartkeyboard||!inputFocused||ImGui::GetIO().WantTextInput||fileAction!=FileAction::None)return;
         SDL_Scancode code=lastScancode;int r,b;bool shift;
         char c=e.text.text[0];if(c>='a'&&c<='z')c=char(c-'a'+'A');else if(c>='A'&&c<='Z')c=char(c-'A'+'a');
         if(Keyboard::decode(c,r,b,shift)) {
             machine->keyboard.key(r,b,true);machine->keyboard.shift=shift;held[code]=std::make_pair(r,b);
         }
     }
+    static Uint32 eventWindow(const SDL_Event& e) {
+        switch(e.type) {
+        case SDL_WINDOWEVENT:return e.window.windowID;
+        case SDL_KEYDOWN:case SDL_KEYUP:return e.key.windowID;
+        case SDL_TEXTINPUT:return e.text.windowID;
+        case SDL_TEXTEDITING:return e.edit.windowID;
+        case SDL_MOUSEMOTION:return e.motion.windowID;
+        case SDL_MOUSEBUTTONDOWN:case SDL_MOUSEBUTTONUP:return e.button.windowID;
+        case SDL_MOUSEWHEEL:return e.wheel.windowID;
+        case SDL_DROPFILE:case SDL_DROPTEXT:return e.drop.windowID;
+        default:return 0;
+        }
+    }
+    void processEvent(const SDL_Event& e) {
+        // SDL owns drop allocations even when their target is hidden/unknown.
+        struct DropGuard {
+            char* value;
+            ~DropGuard(){if(value)SDL_free(value);}
+        } drop{(e.type==SDL_DROPFILE||e.type==SDL_DROPTEXT)?e.drop.file:nullptr};
+        if(e.type==SDL_QUIT) {quit=true;return;}
+        Uint32 id=eventWindow(e);
+        UiWindow* tool=nullptr;
+        if(settings&&settingsWindow&&id==settingsWindow->id())tool=settingsWindow.get();
+        if(debugger&&debuggerWindow&&id==debuggerWindow->id())tool=debuggerWindow.get();
+        if(tool) {
+            ImGuiContextScope context(tool->context());
+            ImGui_ImplSDL2_ProcessEvent(&e);
+            if(e.type==SDL_WINDOWEVENT&&e.window.event==SDL_WINDOWEVENT_CLOSE) {
+                if(tool==settingsWindow.get())settings=false;else debugger=false;
+                tool->hide();return;
+            }
+            if(e.type==SDL_KEYDOWN&&!e.key.repeat&&!ImGui::GetIO().WantTextInput) {
+                SDL_Scancode key=e.key.keysym.scancode;
+                if(key==SDL_SCANCODE_ESCAPE&&!ImGui::IsPopupOpen("",ImGuiPopupFlags_AnyPopupId)) {
+                    if(tool==settingsWindow.get())settings=false;else debugger=false;
+                    tool->hide();
+                } else if(tool==debuggerWindow.get()) {
+                    if(key==SDL_SCANCODE_F10)step();
+                    if(key==SDL_SCANCODE_F11)stepOver();
+                    if(key==SDL_SCANCODE_F12){debugger=false;tool->hide();}
+                }
+            }
+            return; // Tool-window typing must never reach the emulated keyboard.
+        }
+        if(id&&id!=SDL_GetWindowID(window))return;
+        ImGuiContextScope context(mainContext);
+        ImGui_ImplSDL2_ProcessEvent(&e);
+        if(e.type==SDL_WINDOWEVENT) {
+            if(e.window.event==SDL_WINDOWEVENT_CLOSE)quit=true;
+            if(e.window.event==SDL_WINDOWEVENT_FOCUS_LOST)releaseKeys();
+        }
+        if(e.type==SDL_KEYDOWN){lastScancode=e.key.keysym.scancode;keyEvent(e);}
+        if(e.type==SDL_KEYUP)keyEvent(e);
+        if(e.type==SDL_TEXTINPUT)textEvent(e);
+        if(e.type==SDL_DROPFILE)openPath(e.drop.file);
+    }
     SDL_Scancode lastScancode=SDL_SCANCODE_UNKNOWN;
     void draw() {
+        ImGuiContextScope context(mainContext);
         auto& m=*machine;
         ImGui_ImplSDLRenderer2_NewFrame();ImGui_ImplSDL2_NewFrame();ImGui::NewFrame();
         auto& io=ImGui::GetIO();
@@ -400,18 +490,145 @@ class App {
             ImGui::PopID();
         }
         ImGui::End();
-        settingsDialog();debugWindow();fileDialog();
+        fileDialog();
         if(openErrorPopup){ImGui::OpenPopup("Error");openErrorPopup=false;}
         if(ImGui::BeginPopupModal("Error",nullptr,ImGuiWindowFlags_AlwaysAutoResize)){ImGui::TextWrapped("%s",error.c_str());if(ImGui::Button("OK"))ImGui::CloseCurrentPopup();ImGui::EndPopup();}
         if(about){ImGui::Begin("About IQ-151",&about,ImGuiWindowFlags_AlwaysAutoResize);ImGui::TextUnformatted("IQ-151 | C++11 + SDL2\nPort of jIQ151 by Omikron / tmilata\nGPL-3.0-or-later\nDear ImGui: MIT | SDL2: zlib\nROMs and original toolbar artwork are embedded.");ImGui::End();}
         if(showHelp){ImGui::Begin("Keyboard / help",&showHelp);ImGui::TextUnformatted("F1-F5: IQ function keys | Alt / AltGr: FA / FB\nF6: BR | F7: Reset | Ctrl+P: Pause\nF8 / F9: Save / load snapshot | Ctrl+F8 / F9: Quick slot\nF12: Debugger | F10: Step | F11: Step over\nRight-click screen: Paste | Drag selection: Copy\nDrop CSW / WAV / IQD / HEX / BAS / ISN onto the window.\nRight-click a mounted disk filename for write protection / eject.\nOriginal keyboard maps physical US keys; Smart keyboard uses typed characters.\nTape motor is controlled by the emulated machine.\nSD-ROM files are read from the selected SD root.");ImGui::End();}
         ImGui::Render();SDL_SetRenderDrawColor(renderer,230,230,230,255);SDL_RenderClear(renderer);ImGui_ImplSDLRenderer2_RenderDrawData(ImGui::GetDrawData(),renderer);SDL_RenderPresent(renderer);
+        drawToolWindows();
     }
+    // Exercise actual SDL window IDs, event routing, renderers and context lifetimes.
+    // Kept beside the existing --ui-smoke driver; normal sessions never enter it.
+    static void windowCheck(bool ok,const char* message) {
+        if(!ok)throw std::runtime_error(std::string("SDL windows: ")+message);
+    }
+    static void pushKey(SDL_Window* target,SDL_Scancode code,bool down=true) {
+        SDL_Event event{};event.type=down?SDL_KEYDOWN:SDL_KEYUP;
+        event.key.windowID=SDL_GetWindowID(target);event.key.keysym.scancode=code;
+        event.key.keysym.sym=SDL_GetKeyFromScancode(code);event.key.state=down?SDL_PRESSED:SDL_RELEASED;
+        windowCheck(SDL_PushEvent(&event)==1,"cannot queue keyboard event");
+    }
+    static void pushWindow(SDL_Window* target,Uint8 type) {
+        SDL_Event event{};event.type=SDL_WINDOWEVENT;event.window.windowID=SDL_GetWindowID(target);event.window.event=type;
+        windowCheck(SDL_PushEvent(&event)==1,"cannot queue window event");
+    }
+    static void pushClick(UiWindow& target,ImVec2 position,bool down) {
+        SDL_WarpMouseInWindow(target.window(),int(position.x),int(position.y));
+        SDL_Event e{};e.type=SDL_MOUSEMOTION;e.motion.windowID=target.id();
+        e.motion.x=int(position.x);e.motion.y=int(position.y);SDL_PushEvent(&e);
+        e=SDL_Event{};e.type=down?SDL_MOUSEBUTTONDOWN:SDL_MOUSEBUTTONUP;
+        e.button.windowID=target.id();e.button.button=SDL_BUTTON_LEFT;
+        e.button.state=down?SDL_PRESSED:SDL_RELEASED;e.button.x=int(position.x);e.button.y=int(position.y);
+        windowCheck(SDL_PushEvent(&e)==1,"cannot queue tool button click");
+    }
+    static void renderedWindow(UiWindow& tool) {
+        int w,h;windowCheck(SDL_GetRendererOutputSize(tool.renderer(),&w,&h)==0,"renderer output size");
+        std::vector<uint32_t> pixels(std::size_t(w)*h);
+        windowCheck(SDL_RenderReadPixels(tool.renderer(),nullptr,SDL_PIXELFORMAT_ARGB8888,pixels.data(),w*4)==0,"read tool framebuffer");
+        windowCheck(std::count_if(pixels.begin(),pixels.end(),[&](uint32_t p){return p!=pixels[0];})>100,"tool controls were not rendered");
+    }
+    int64_t smokeClock=0;
+    Uint32 smokeSettingsID=0,smokeDebuggerID=0;
+    void smokeWindows(int frame) {
+        auto& m=*machine;
+        if(!error.empty())throw std::runtime_error(error);
+        switch(frame) {
+        case 120:
+            windowCheck(m.screenText().find("BASIC-G")!=std::string::npos,"boot text missing");
+            showSettings();break;
+        case 122: {
+            windowCheck(settingsWindow&&settingsWindow->id()!=SDL_GetWindowID(window),"Settings is not a separate SDL window");
+            windowCheck(!m.paused,"Settings paused emulation");
+            smokeSettingsID=settingsWindow->id();renderedWindow(*settingsWindow);
+            const char* driver=SDL_GetCurrentVideoDriver();
+            if(driver&&(std::strcmp(driver,"x11")==0||std::strcmp(driver,"windows")==0))
+                windowCheck(settingsWindow->hasNativeParent(window),"missing native Settings owner");
+            // Reopening must raise the existing window without resetting edits.
+            edit.video=1;showSettings();windowCheck(edit.video==1,"reopening discarded Settings edits");
+            pushKey(settingsWindow->window(),SDL_SCANCODE_A);
+            SDL_Event text{};text.type=SDL_TEXTINPUT;text.text.windowID=smokeSettingsID;text.text.text[0]='x';
+            SDL_PushEvent(&text);break;
+        }
+        case 124:
+            windowCheck(std::all_of(m.keyboard.row.begin(),m.keyboard.row.end(),[](int r){return r==255;}),"Settings typing leaked into IQ keyboard");
+            windowCheck(settingsWindow->id()==smokeSettingsID,"Settings was duplicated");
+            showDebugger();break;
+        case 126: {
+            windowCheck(debuggerWindow&&debuggerWindow->id()!=smokeSettingsID&&debuggerWindow->id()!=SDL_GetWindowID(window),"Debugger is not a separate SDL window");
+            windowCheck(debuggerWindow->context()!=settingsWindow->context()&&debuggerWindow->context()!=mainContext,"ImGui context shared between renderers");
+            const char* driver=SDL_GetCurrentVideoDriver();
+            if(driver&&(std::strcmp(driver,"x11")==0||std::strcmp(driver,"windows")==0))
+                windowCheck(debuggerWindow->hasNativeParent(window),"missing native Debugger owner");
+            smokeDebuggerID=debuggerWindow->id();renderedWindow(*debuggerWindow);
+            smokeClock=m.clock.tstates;pushKey(debuggerWindow->window(),SDL_SCANCODE_F10);break;
+        }
+        case 128:
+            windowCheck(m.paused&&m.clock.tstates>smokeClock,"F10 in debugger did not step CPU");
+            pushKey(debuggerWindow->window(),SDL_SCANCODE_F10,false);
+            SDL_SetWindowSize(debuggerWindow->window(),900,650);break;
+        case 130: {
+            int w,h;SDL_GetRendererOutputSize(debuggerWindow->renderer(),&w,&h);
+            windowCheck(w>=900&&h>=650,"resizing debugger did not resize renderer");
+            renderedWindow(*debuggerWindow);pushWindow(settingsWindow->window(),SDL_WINDOWEVENT_CLOSE);break;
+        }
+        case 132:
+            windowCheck(!quit&&!settings&&m.config.video==0,"Settings close applied changes or exited emulator");
+            windowCheck((SDL_GetWindowFlags(settingsWindow->window())&SDL_WINDOW_SHOWN)==0,"Settings close did not hide window");
+            showSettings();break;
+        case 134:
+            windowCheck(settings&&settingsWindow->id()==smokeSettingsID&&edit.video==m.config.video,"Settings could not reopen with current configuration");
+            pushKey(settingsWindow->window(),SDL_SCANCODE_ESCAPE);break;
+        case 136:
+            windowCheck(!settings,"Escape did not cancel Settings");
+            pushWindow(debuggerWindow->window(),SDL_WINDOWEVENT_CLOSE);break;
+        case 138:
+            windowCheck(!quit&&!debugger,"Debugger close exited emulator");
+            pushKey(window,SDL_SCANCODE_F12);break;
+        case 140:
+            windowCheck(debugger&&debuggerWindow->id()==smokeDebuggerID,"F12 did not reopen existing debugger");
+            pushKey(window,SDL_SCANCODE_F12,false);resume();
+            pushWindow(window,SDL_WINDOWEVENT_FOCUS_GAINED);pushKey(window,SDL_SCANCODE_A);
+            smokeClock=m.clock.tstates;break;
+        case 142:
+            windowCheck(m.clock.tstates>smokeClock,"emulation did not run while debugger remained open");
+            windowCheck(m.keyboard.row[2]!=255,"main-window input stopped working with debugger open");
+            pushWindow(window,SDL_WINDOWEVENT_FOCUS_LOST);break;
+        case 144:
+            windowCheck(std::all_of(m.keyboard.row.begin(),m.keyboard.row.end(),[](int r){return r==255;}),"focus loss left an IQ key held");
+            pushKey(debuggerWindow->window(),SDL_SCANCODE_B);break;
+        case 146:
+            windowCheck(m.keyboard.row[3]==255,"Debugger typing leaked into IQ keyboard");
+            // Destroy both child contexts while the main renderer remains usable.
+            settings=false;debugger=false;settingsWindow.reset();debuggerWindow.reset();
+            windowCheck(SDL_GetWindowFromID(smokeSettingsID)==nullptr&&SDL_GetWindowFromID(smokeDebuggerID)==nullptr,"tool SDL resources survived destruction");
+            break;
+        case 148:
+            showSettings();showDebugger();break;
+        case 150:
+            windowCheck(settingsWindow&&debuggerWindow&&settingsWindow->id()!=smokeSettingsID&&debuggerWindow->id()!=smokeDebuggerID,"tools could not be recreated after destruction");
+            edit.video=1;showSettings();pushClick(*settingsWindow,settingsApplyPosition,true);break;
+        case 151:
+            pushClick(*settingsWindow,settingsApplyPosition,false);break;
+        case 154:
+            windowCheck(!settings&&m.config.video==1&&!m.paused,"Apply/reset button in Settings did not update machine");
+            pushWindow(window,SDL_WINDOWEVENT_CLOSE);break;
+        case 155:
+            windowCheck(quit,"main-window close did not exit emulator");
+            // UiWindow destructors must restore the main context before SDL_Quit.
+            settingsWindow.reset();debuggerWindow.reset();
+            windowCheck(ImGui::GetCurrentContext()==mainContext,"destroying tools corrupted main context");
+            std::cout<<"SDL windows: separate Settings/Debugger, framebuffer/resize, isolated input, F10/F12, Apply/reset, close/reopen and cleanup verified\n";
+            break;
+        }
+    }
+
 public:
     explicit App(const Options& opts) : options(opts) {for(auto& p:held)p=std::make_pair(-1,-1);}
     ~App() {
         if(audioDevice)SDL_CloseAudioDevice(audioDevice);
-        if(ImGui::GetCurrentContext()){if(rendererBackend)ImGui_ImplSDLRenderer2_Shutdown();if(platformBackend)ImGui_ImplSDL2_Shutdown();ImGui::DestroyContext();}
+        settingsWindow.reset();debuggerWindow.reset();
+        if(mainContext){ImGui::SetCurrentContext(mainContext);if(rendererBackend)ImGui_ImplSDLRenderer2_Shutdown();if(platformBackend)ImGui_ImplSDL2_Shutdown();ImGui::DestroyContext(mainContext);}
         for(auto& icon:icons)SDL_DestroyTexture(icon.second);
         if(screen)SDL_DestroyTexture(screen);if(renderer)SDL_DestroyRenderer(renderer);if(window)SDL_DestroyWindow(window);SDL_Quit();
     }
@@ -435,7 +652,7 @@ public:
         if(!renderer)throw std::runtime_error(SDL_GetError());
         SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY,"0");screen=SDL_CreateTexture(renderer,SDL_PIXELFORMAT_ARGB8888,SDL_TEXTUREACCESS_STREAMING,560,272);
         if(!screen)throw std::runtime_error(SDL_GetError());
-        ImGui::CreateContext();ImGui::GetIO().IniFilename=nullptr;ImGui::StyleColorsLight();
+        mainContext=ImGui::CreateContext();ImGui::GetIO().IniFilename=nullptr;ImGui::StyleColorsLight();
         auto& style=ImGui::GetStyle();style.WindowRounding=0;style.FrameRounding=2;
         platformBackend=ImGui_ImplSDL2_InitForSDLRenderer(window,renderer);
         if(platformBackend)rendererBackend=ImGui_ImplSDLRenderer2_Init(renderer);
@@ -457,24 +674,14 @@ public:
         init();uint64_t last=SDL_GetPerformanceCounter();double accumulator=0;int rendered=0;
         while(!quit) {
             SDL_Event e;
-            while(SDL_PollEvent(&e)) {
-                ImGui_ImplSDL2_ProcessEvent(&e);
-                guarded([&]{
-                    if(e.type==SDL_QUIT)quit=true;
-                    if(e.type==SDL_KEYDOWN){lastScancode=e.key.keysym.scancode;keyEvent(e);}
-                    if(e.type==SDL_KEYUP)keyEvent(e);
-                    if(e.type==SDL_TEXTINPUT)textEvent(e);
-                    if(e.type==SDL_WINDOWEVENT&&e.window.event==SDL_WINDOWEVENT_FOCUS_LOST){machine->cancelPaste();machine->keyboard.reset();for(auto& p:held)p.first=-1;}
-                    if(e.type==SDL_DROPFILE){std::string path=e.drop.file;SDL_free(e.drop.file);openPath(path);}
-                });
-            }
+            while(SDL_PollEvent(&e)) guarded([&]{processEvent(e);});
             uint64_t now=SDL_GetPerformanceCounter();double elapsed=double(now-last)/SDL_GetPerformanceFrequency();last=now;
             accumulator+=std::min(.1,elapsed)*speed;
             if(options.smoke)accumulator=.02;
             guarded([&]{
                 while(accumulator>=.02) {
                     accumulator-=.02;machine->frame();
-                    if(machine->paused&&tempBreakpoint>=0){tempBreakpoint=-1;synchronizeBreakpoints();debugger=true;debugAddress=machine->cpu.getRegPC();}
+                    if(machine->paused&&tempBreakpoint>=0){tempBreakpoint=-1;synchronizeBreakpoints();showDebugger();}
                     if(audioDevice&&machine->config.audio&&!machine->paused&&speed==1) {
                         if(SDL_GetQueuedAudioSize(audioDevice)<44100)SDL_QueueAudio(audioDevice,machine->audio.data(),Uint32(machine->audio.size()*2));
                     }
@@ -483,7 +690,8 @@ public:
                 uint32_t colors[]={0xffffffff,0xff80ff80,0xffffbf40};auto pixels=machine->render(colors[prefs.color]);
                 if(SDL_UpdateTexture(screen,nullptr,pixels.data(),560*4))throw std::runtime_error(SDL_GetError());draw();
             });
-            if(options.smoke) {
+            if(options.windowSmoke) smokeWindows(++rendered);
+            else if(options.smoke) {
                 ++rendered;
                 if(rendered==120&&machine->screenText().find("BASIC-G")==std::string::npos)
                     throw std::runtime_error("SDL smoke: boot text missing");
