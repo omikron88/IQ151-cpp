@@ -1,0 +1,30 @@
+IQ-151 C++11 / SDL2
+==================
+This project is a derivative port of https://github.com/omikron88/iq-151
+at commit 5bd21af8a332c14483f184bb30f7074c1eea80d8.
+Upstream authors include Omikron, tmilata and contributors named in that source.
+License: GPL-3.0-or-later (see LICENSE).
+
+The CPU opcode implementation, 8255 implementation, keyboard matrix, memory and
+I/O mapping, video algorithms and ISN format were translated from that project.
+Pio8255: Copyright (c) 2006 Roman Borik <pmd85emu@gmail.com>, GPL-3.0-or-later.
+The ROM images, character ROM, BASIC SD loader and original toolbar icons are
+copied from the upstream repository and embedded unmodified. No independent
+ownership or new licensing of those historical ROMs or artwork is asserted.
+The fixture snapshots and hashes were produced by running the upstream Java
+implementation. tests/reference records how to reproduce the comparison.
+
+Third-party libraries:
+* Dear ImGui v1.91.9b, commit f5befd2d29e66809cd1110a152e375a7f1981f06.
+  Copyright (c) 2014-2025 Omar Cornut. MIT license, see
+  third_party/imgui/LICENSE.txt. Includes imstb headers with their own notices.
+* SDL2 release-2.32.10, commit 5d249570393f7a37e037abf22cd6012a4cc56a71.
+  Copyright (C) 1997-2025 Sam Lantinga and contributors. zlib license,
+  see third_party/SDL2-LICENSE.txt. Retrieved as a pinned, SHA-256 verified
+  source archive by CMake when a system SDL2 is not used.
+* Statically linked GCC runtimes use the GCC Runtime Library Exception.
+  See third_party/GCC-RUNTIME-LIBRARY-EXCEPTION.txt.
+
+The SDL frontend, media/file adapters, CMake build and tests in this port are
+GPL-3.0-or-later. Distributing a binary of the emulator requires complying with
+the GPL, including providing the corresponding source and these notices.

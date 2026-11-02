@@ -1,0 +1,4 @@
+* text=auto eol=lf
+roms/** -text -diff
+tests/fixtures/** -text -diff
+third_party/** -whitespace
