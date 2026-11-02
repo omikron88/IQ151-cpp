@@ -2,3 +2,5 @@
 roms/** -text -diff
 tests/fixtures/** -text -diff
 third_party/** -whitespace
+*.hex -text
+*.bas -text

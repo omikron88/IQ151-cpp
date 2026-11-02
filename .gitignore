@@ -1,8 +1,3 @@
 /build*/
-/dist/
-/SDRoot/
-/iq151.ini
-/quickslot.isn
-/core
-*.user
-*.swp
+iq151.ini
+quickslot.isn
