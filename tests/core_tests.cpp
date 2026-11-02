@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "iq151/machine.hpp"
 #include "iq151/files.hpp"
+#include "iq151/preferences.hpp"
 #include <algorithm>
 #include <cstdio>
 #include <iostream>
@@ -49,6 +50,32 @@ void cpuOracle() {
         require(bool(oracle)&&expectedOp==unsigned(op)&&hash==expected,msg.str());
     }
     std::cout<<"CPU: 8192 instruction cases match Java, including flags, timing and memory\n";
+}
+void preferences() {
+    makeDirectory("preferences-test");
+    Preferences p;p.dir="preferences-test";p.config.main=1;p.config.video=1;p.color=2;
+    p.config.sdRoot="C:\\IQ 151 data\\SD-ROM";p.save();
+    Preferences loaded;loaded.dir=p.dir;loaded.load();
+    require(loaded.config.sdRoot==p.config.sdRoot&&loaded.config.main==1&&loaded.config.video==1&&loaded.color==2,"Preferences retain SD folder with spaces and Windows backslashes");
+    require(loaded.sdRootFor("override root")=="override root","CLI SD folder overrides saved setting");
+    require(loaded.sdRootFor("")==p.config.sdRoot,"Saved SD folder overrides default");
+    std::string text="sdRoot /some folder/with spaces\r\nmodule 3\r\nvideo 1\r\ncolor 1\r\n";
+    writeFile(p.dir+"/iq151.ini",reinterpret_cast<const uint8_t*>(text.data()),text.size());
+    Preferences reordered;reordered.dir=p.dir;reordered.load();
+    require(reordered.config.sdRoot=="/some folder/with spaces"&&reordered.config.main==3&&reordered.color==1,"Path line does not stop numeric preference parsing");
+    text="module 1\nunknown ignored value\nvideo 1\n";
+    writeFile(p.dir+"/iq151.ini",reinterpret_cast<const uint8_t*>(text.data()),text.size());
+    Preferences legacy;legacy.dir=p.dir;legacy.load();
+    require(legacy.config.main==1&&legacy.config.video==1&&legacy.sdRootFor("")==p.dir+"/SDRoot","Legacy configuration keeps default SD folder");
+    auto original=readFile(p.dir+"/iq151.ini");p.config.sdRoot="bad\npath";
+    rejects([&]{p.save();},"Multiline SD folder rejected");
+    require(original==readFile(p.dir+"/iq151.ini"),"Invalid folder does not truncate preferences");
+    std::remove((p.dir+"/iq151.ini").c_str());
+    Config config;config.sdRoot="from Config";
+    std::unique_ptr<Machine> configured(new Machine(config));
+    require(configured->sd.root==config.sdRoot,"Machine constructor uses Config SD folder");
+    std::unique_ptr<Machine> override(new Machine(config,"constructor override"));
+    require(override->config.sdRoot=="constructor override"&&override->sd.root=="constructor override","Explicit constructor SD folder retains precedence");
 }
 void memoryAndInterrupts() {
     Config c;Memory m(c);m.setBootstrap(true);int boot=m.read(0);m.write(0,42);require(m.read(0)==boot,"bootstrap ROM is read-only");m.setBootstrap(false);require(m.read(0)==42,"bootstrap writes reach underlying RAM");
@@ -141,8 +168,8 @@ void sdIntegration() {
     // Keep this root isolated so the manager's first item is always TEST.BAS.
     std::string basic="10 PRINT \"SD OK\"\r\n20 END\r\n";
     writeFile("sd-test/TEST.BAS",reinterpret_cast<const uint8_t*>(basic.data()),basic.size());
-    Config c;c.sdrom=c.sdAutorun=true;
-    std::unique_ptr<Machine> p(new Machine(c,"sd-test"));auto& m=*p;
+    Config c;c.sdrom=c.sdAutorun=true;c.sdRoot="sd-test";
+    std::unique_ptr<Machine> p(new Machine(c));auto& m=*p;
     for(int i=0;i<600;++i)m.frame();
     require(m.screenText().find("IQ 151 SD-ROM Manager")!=std::string::npos,"SD-ROM bootstrap executes embedded loader");
     require(m.screenText().find("TEST.BAS")!=std::string::npos,"SD-ROM directory is transferred through 8255 handshake");
@@ -151,6 +178,22 @@ void sdIntegration() {
     require(m.screenText().find("10 PRINT")!=std::string::npos,"SD-ROM file transferred to BASIC");
     m.paste("RUN\n");for(int i=0;i<300;++i)m.frame();
     require(m.screenText().find("\nSD OK\n")!=std::string::npos,"Program loaded via SD-ROM executes");
+    makeDirectory("sd-test second folder");
+    std::string other="10 PRINT \"SECOND ROOT\"\r\n20 END\r\n";
+    writeFile("sd-test second folder/SECOND.BAS",reinterpret_cast<const uint8_t*>(other.data()),other.size());
+    m.config.sdRoot=absolutePath("sd-test second folder");m.reset();
+    for(int i=0;i<600;++i)m.frame();
+    require(m.sd.root==m.config.sdRoot&&m.screenText().find("SECOND.BAS")!=std::string::npos&&m.screenText().find("TEST.BAS")==std::string::npos,"Reset switches SD-ROM to configured folder");
+    m.keyboard.key(4,4,true);for(int i=0;i<8;++i)m.frame();m.keyboard.reset();
+    for(int i=0;i<1000;++i)m.frame();m.paste("RUN\n");for(int i=0;i<300;++i)m.frame();
+    require(m.screenText().find("\nSECOND ROOT\n")!=std::string::npos,"BASIC loads and runs from newly configured SD folder");
+    std::remove("sd-test second folder/SECOND.BAS");std::remove("sd-test second folder/__BLOADER.BAS");
+    std::string target=absolutePath("sd-test/TEST.BAS");
+#ifdef _WIN32
+    require(sdPath(target.substr(0,3),target.substr(3))==target,"SD folder can be the Windows drive root");
+#else
+    require(sdPath("/",target)==target,"SD folder can be the filesystem root");
+#endif
     // Simulate the 8255 mode-1 output protocol used by the Java ATmega save interrupt.
     SDRom sd("sd-test");sd.reset();
     sd.pio.CpuWrite(3,14);sd.control(14);sd.pio.CpuWrite(3,13);sd.control(13);
@@ -166,6 +209,6 @@ void sdIntegration() {
 
 }
 int main() {
-    try {cpuOracle();memoryAndInterrupts();bootAndVideo();filesAndMedia();soundIntegration();tapeIntegration();sdIntegration();std::cout<<"PASS: "<<checks<<" checks\n";return 0;}
+    try {cpuOracle();preferences();memoryAndInterrupts();bootAndVideo();filesAndMedia();soundIntegration();tapeIntegration();sdIntegration();std::cout<<"PASS: "<<checks<<" checks\n";return 0;}
     catch(const std::exception& e){std::cerr<<"FAIL after "<<checks<<" checks: "<<e.what()<<'\n';return 1;}
 }

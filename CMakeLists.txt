@@ -11,7 +11,7 @@ option(IQ151_STATIC "Link SDL and C++ runtime statically (only OS libraries rema
 option(IQ151_FETCH_SDL "Build a pinned SDL2 if a suitable system package is unavailable" ON)
 include(CTest)
 include(cmake/EmbedAssets.cmake)
-add_library(iq151_core src/machine.cpp src/media.cpp src/files.cpp src/sdrom.cpp src/snapshot.cpp src/disassembler.cpp "${ASSET_CPP}")
+add_library(iq151_core src/preferences.cpp src/machine.cpp src/media.cpp src/files.cpp src/sdrom.cpp src/snapshot.cpp src/disassembler.cpp "${ASSET_CPP}")
 target_include_directories(iq151_core PUBLIC include)
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(iq151_core PRIVATE -Wall -Wextra -Wpedantic)

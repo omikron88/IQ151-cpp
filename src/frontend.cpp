@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "iq151/app.hpp"
 #include "iq151/files.hpp"
+#include "iq151/preferences.hpp"
 #include "ui_window.hpp"
 #include <SDL.h>
 #include "imgui.h"
@@ -25,35 +26,6 @@ bool physical(SDL_Scancode code,int& r,int& b) {
     }
 }
 std::string extension(std::string p) {auto dot=p.find_last_of('.');p=dot==std::string::npos?"":p.substr(dot);for(char& c:p)c=char(std::tolower(static_cast<unsigned char>(c)));return p;}
-struct Preferences {
-    Config config;
-    int color=0;
-    float speed=1;
-    std::string dir;
-    void load() {
-        std::ifstream f((dir+"/iq151.ini").c_str());std::string key;int value;
-        while(f>>key>>value) {
-            if(key=="module"&&value>=0&&value<=3)config.main=value;
-            if(key=="monitor"&&value>=10&&value<=13)config.monitor=value;
-            if(key=="video"&&(value==0||value==1))config.video=value;
-            if(key=="mem64")config.mem64=value!=0;if(key=="grafik")config.grafik=value!=0;
-            if(key=="sdrom")config.sdrom=value!=0;if(key=="disc2")config.disc2=value!=0;
-            if(key=="audio")config.audio=value!=0;if(key=="smart")config.smartkeyboard=value!=0;
-            if(key=="sdAutorun")config.sdAutorun=value!=0;if(key=="amosAutorun")config.amosAutorun=value!=0;
-            if(key=="felAutorun")config.felAutorun=value!=0;
-            if(key=="color"&&value>=0&&value<=2)color=value;
-        }
-    }
-    void save() {
-        std::ofstream f((dir+"/iq151.ini").c_str());
-        if(!f) throw std::runtime_error("Cannot save preferences in "+dir);
-        f<<"module "<<config.main<<"\nmonitor "<<config.monitor<<"\nvideo "<<config.video
-          <<"\nmem64 "<<config.mem64<<"\ngrafik "<<config.grafik<<"\nsdrom "<<config.sdrom<<"\ndisc2 "<<config.disc2
-          <<"\naudio "<<config.audio<<"\nsmart "<<config.smartkeyboard<<"\nsdAutorun "<<config.sdAutorun
-          <<"\namosAutorun "<<config.amosAutorun<<"\nfelAutorun "<<config.felAutorun<<"\ncolor "<<color<<'\n';
-        if(!f)throw std::runtime_error("Cannot write preferences");
-    }
-};
 enum class FileAction {None,LoadTape,SaveTape,LoadBinary,SaveBinary,LoadState,SaveState,DiskA,DiskB,Screenshot};
 class App {
     SDL_Window* window=nullptr;
@@ -67,6 +39,9 @@ class App {
     std::unique_ptr<Machine> machine;
     Preferences prefs;
     Config edit;
+    std::array<char,4096> editSdRoot{},sdBrowsePath{};
+    std::string settingsError,sdBrowseDir,sdBrowseError;
+    std::vector<Entry> sdFolders;
     Options options;
     bool quit=false,debugger=false,settings=false,about=false,showHelp=false,z80=false;
     bool platformBackend=false,rendererBackend=false;
@@ -83,6 +58,7 @@ class App {
     char filePath[2048]{};
     bool openFilePopup=false,openErrorPopup=false;
     float speed=1;
+    ImVec2 settingsBrowsePosition,sdBrowseUsePosition;
     ImVec2 settingsApplyPosition; // Used by the SDL interaction smoke test.
     bool hexInput(const char* label,int& value,int digits) {
         ImGui::SetNextItemWidth(float(digits*10+24));
@@ -96,7 +72,10 @@ class App {
         for(auto& key:held)key.first=-1;
     }
     void showSettings() {
-        if(!settings) edit=machine->config;
+        if(!settings) {
+            edit=machine->config;settingsError.clear();
+            std::snprintf(editSdRoot.data(),editSdRoot.size(),"%s",edit.sdRoot.c_str());
+        }
         settings=true;settingsFocus=true;releaseKeys();
     }
     void showDebugger() {
@@ -105,7 +84,7 @@ class App {
     }
     void drawToolWindows() {
         if(settings) {
-            if(!settingsWindow) settingsWindow.reset(new UiWindow(window,"IQ-151 - Settings",480,440,440,400));
+            if(!settingsWindow) settingsWindow.reset(new UiWindow(window,"IQ-151 - Settings",560,520,500,480));
             if(settingsFocus) {settingsWindow->show();settingsFocus=false;}
             ImGuiContextScope context(settingsWindow->context());
             settingsWindow->begin();settingsDialog();settingsWindow->present();
@@ -299,6 +278,57 @@ class App {
         if(iconButton("savestate","Save snapshot (F8)","osn_save"))browse(FileAction::SaveState);ImGui::SameLine();
         if(iconButton("break","Break (F6)","nmi"))m.pic.irq(5);
     }
+    void navigateSdFolder(const std::string& path) {
+        try {
+            auto folders=directory(path);std::string absolute=absolutePath(path);
+            sdFolders.swap(folders);sdBrowseDir=absolute;sdBrowseError.clear();
+            std::snprintf(sdBrowsePath.data(),sdBrowsePath.size(),"%s",absolute.c_str());
+        } catch(const std::exception& e) {sdBrowseError=e.what();}
+    }
+    void openSdFolderBrowser() {
+        navigateSdFolder(editSdRoot[0]?editSdRoot.data():prefs.dir+"/SDRoot");
+        if(!sdBrowseError.empty())navigateSdFolder(prefs.dir);
+        ImGui::OpenPopup("SD-ROM folder");
+    }
+    void sdFolderBrowser() {
+        ImGui::SetNextWindowSize(ImVec2(470,370),ImGuiCond_Appearing);
+        if(!ImGui::BeginPopupModal("SD-ROM folder",nullptr,ImGuiWindowFlags_NoResize))return;
+        ImGui::SetNextItemWidth(-52);
+        bool enter=ImGui::InputText("##directory",sdBrowsePath.data(),sdBrowsePath.size(),ImGuiInputTextFlags_EnterReturnsTrue);
+        ImGui::SameLine();if(ImGui::Button("Go")||enter)navigateSdFolder(sdBrowsePath.data());
+        if(ImGui::Button("Parent directory"))navigateSdFolder(sdBrowseDir+"/..");
+        ImGui::BeginChild("folders",ImVec2(0,220),ImGuiChildFlags_Borders);
+        std::string navigate;
+        for(const auto& entry:sdFolders) {
+            if(!entry.directory||entry.name=="..")continue;
+            if(ImGui::Selectable(("[DIR] "+entry.name).c_str()))navigate=sdBrowseDir+"/"+entry.name;
+        }
+        ImGui::EndChild();
+        if(!navigate.empty())navigateSdFolder(navigate);
+        if(!sdBrowseError.empty())ImGui::TextWrapped("%s",sdBrowseError.c_str());
+        if(ImGui::Button("Use this folder")) {
+            std::snprintf(editSdRoot.data(),editSdRoot.size(),"%s",sdBrowseDir.c_str());
+            settingsError.clear();ImGui::CloseCurrentPopup();
+        }
+        ImVec2 useMin=ImGui::GetItemRectMin(),useMax=ImGui::GetItemRectMax();
+        sdBrowseUsePosition=ImVec2((useMin.x+useMax.x)*.5f,(useMin.y+useMax.y)*.5f);
+        ImGui::SameLine();if(ImGui::Button("Cancel")||ImGui::IsKeyPressed(ImGuiKey_Escape))ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
+    void applySettings() {
+        try {
+            Config next=edit;
+            next.sdRoot=editSdRoot[0]?editSdRoot.data():prefs.dir+"/SDRoot";
+            if(next.sdRoot.find_first_of("\r\n")!=std::string::npos)throw std::runtime_error("SD-ROM folder must be a single line");
+            // Reject a file, unreadable location or missing parent before resetting the CPU.
+            if(next.sdRoot!=machine->config.sdRoot||next.sdrom) {
+                makeDirectory(next.sdRoot);directory(next.sdRoot);next.sdRoot=absolutePath(next.sdRoot);
+            }
+            machine->config=next;reset();prefs.config=machine->config;
+            if(!options.smoke)prefs.save();
+            settings=false;
+        } catch(const std::exception& e) {settingsError=e.what();}
+    }
     void settingsDialog() {
         if(!settings)return;
         ImGui::Begin("Settings",nullptr,ImGuiWindowFlags_NoTitleBar|ImGuiWindowFlags_NoResize|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoCollapse|ImGuiWindowFlags_NoSavedSettings);
@@ -307,14 +337,23 @@ class App {
         ImGui::Combo("Video",&edit.video,"Video 32\0Video 64\0");
         ImGui::Checkbox("64 KB RAM",&edit.mem64);ImGui::Checkbox("Grafik",&edit.grafik);
         ImGui::Checkbox("SD-ROM",&edit.sdrom);ImGui::SameLine();ImGui::Checkbox("SD autorun",&edit.sdAutorun);
+        ImGui::TextUnformatted("SD-ROM folder");
+        ImGui::SetNextItemWidth(-155);
+        if(ImGui::InputTextWithHint("##sdroot",(prefs.dir+"/SDRoot").c_str(),editSdRoot.data(),editSdRoot.size()))settingsError.clear();
+        ImGui::SameLine();if(ImGui::Button("Browse..."))openSdFolderBrowser();
+        ImVec2 browseMin=ImGui::GetItemRectMin(),browseMax=ImGui::GetItemRectMax();
+        settingsBrowsePosition=ImVec2((browseMin.x+browseMax.x)*.5f,(browseMin.y+browseMax.y)*.5f);
+        ImGui::SameLine();if(ImGui::Button("Default")){editSdRoot[0]=0;settingsError.clear();}
         ImGui::Checkbox("Disk2",&edit.disc2);ImGui::Checkbox("Sound",&edit.audio);
         ImGui::Checkbox("Smart keyboard (host characters)",&edit.smartkeyboard);
         ImGui::Checkbox("AMOS autorun",&edit.amosAutorun);ImGui::SameLine();ImGui::Checkbox("FEL autorun",&edit.felAutorun);
         ImGui::Separator();ImGui::TextWrapped("Apply resets the machine. ROMs are built into the executable.");
-        if(ImGui::Button("Apply and reset")) {guarded([&]{machine->config=edit;reset();prefs.config=edit;if(!options.smoke)prefs.save();});settings=false;}
+        if(ImGui::Button("Apply and reset"))applySettings();
         ImVec2 buttonMin=ImGui::GetItemRectMin(),buttonMax=ImGui::GetItemRectMax();
         settingsApplyPosition=ImVec2((buttonMin.x+buttonMax.x)*.5f,(buttonMin.y+buttonMax.y)*.5f);
         ImGui::SameLine();if(ImGui::Button("Cancel"))settings=false;
+        if(!settingsError.empty())ImGui::TextWrapped("%s",settingsError.c_str());
+        sdFolderBrowser();
         ImGui::End();
     }
     void debugWindow() {
@@ -529,6 +568,7 @@ class App {
         windowCheck(std::count_if(pixels.begin(),pixels.end(),[&](uint32_t p){return p!=pixels[0];})>100,"tool controls were not rendered");
     }
     int64_t smokeClock=0;
+    std::string smokeSdRoot;
     Uint32 smokeSettingsID=0,smokeDebuggerID=0;
     void smokeWindows(int frame) {
         auto& m=*machine;
@@ -607,18 +647,52 @@ class App {
             showSettings();showDebugger();break;
         case 150:
             windowCheck(settingsWindow&&debuggerWindow&&settingsWindow->id()!=smokeSettingsID&&debuggerWindow->id()!=smokeDebuggerID,"tools could not be recreated after destruction");
-            edit.video=1;showSettings();pushClick(*settingsWindow,settingsApplyPosition,true);break;
+            smokeSdRoot=prefs.dir+"/sd-folder-smoke-"+std::to_string(SDL_GetPerformanceCounter())+" data";
+            makeDirectory(smokeSdRoot);
+            std::snprintf(editSdRoot.data(),editSdRoot.size(),"%s",smokeSdRoot.c_str());
+            edit.video=1;edit.sdrom=true;edit.sdAutorun=true;showSettings();
+            pushClick(*settingsWindow,settingsBrowsePosition,true);break;
         case 151:
-            pushClick(*settingsWindow,settingsApplyPosition,false);break;
-        case 154:
-            windowCheck(!settings&&m.config.video==1&&!m.paused,"Apply/reset button in Settings did not update machine");
-            pushWindow(window,SDL_WINDOWEVENT_CLOSE);break;
+            pushClick(*settingsWindow,settingsBrowsePosition,false);break;
+        case 154: {
+            ImGuiContextScope context(settingsWindow->context());
+            windowCheck(ImGui::IsPopupOpen("",ImGuiPopupFlags_AnyPopupId)&&sdBrowseDir==absolutePath(smokeSdRoot),"SD folder browser did not open at typed folder");
+            windowCheck(m.config.sdRoot!=absolutePath(smokeSdRoot),"Browsing applied SD folder before confirmation");
+            pushClick(*settingsWindow,sdBrowseUsePosition,true);break;
+        }
         case 155:
+            pushClick(*settingsWindow,sdBrowseUsePosition,false);break;
+        case 158: {
+            ImGuiContextScope context(settingsWindow->context());
+            windowCheck(!ImGui::IsPopupOpen("",ImGuiPopupFlags_AnyPopupId)&&editSdRoot.data()==absolutePath(smokeSdRoot),"Folder selection did not return to Settings");
+            pushClick(*settingsWindow,settingsApplyPosition,true);break;
+        }
+        case 159:
+            pushClick(*settingsWindow,settingsApplyPosition,false);break;
+        case 162:
+            windowCheck(!settings&&m.config.video==1&&!m.paused,"Apply/reset button in Settings did not update machine");
+            windowCheck(m.config.sdRoot==absolutePath(smokeSdRoot)&&m.sd.root==m.config.sdRoot,"Selected SD folder did not reach machine configuration");
+            windowCheck(readFile(m.sd.root+"/__BLOADER.BAS").size()==asset("__BLOADER.BAS").size,"SD loader was not created in selected folder");
+            showSettings();windowCheck(editSdRoot.data()==m.config.sdRoot,"Reopening Settings lost SD folder");break;
+        case 164: {
+            const uint8_t data='x';writeFile(smokeSdRoot+"/not-a-folder",&data,1);
+            std::snprintf(editSdRoot.data(),editSdRoot.size(),"%s",(smokeSdRoot+"/not-a-folder").c_str());
+            smokeClock=m.clock.tstates;pushClick(*settingsWindow,settingsApplyPosition,true);break;
+        }
+        case 165:
+            pushClick(*settingsWindow,settingsApplyPosition,false);break;
+        case 168:
+            windowCheck(settings&&!settingsError.empty()&&m.config.sdRoot==absolutePath(smokeSdRoot)&&m.clock.tstates>smokeClock,"Invalid SD folder changed or reset the machine");
+            pushKey(settingsWindow->window(),SDL_SCANCODE_ESCAPE);break;
+        case 170:
+            windowCheck(!settings&&m.sd.root==absolutePath(smokeSdRoot),"Cancelling Settings changed SD root");
+            pushWindow(window,SDL_WINDOWEVENT_CLOSE);break;
+        case 171:
             windowCheck(quit,"main-window close did not exit emulator");
-            // UiWindow destructors must restore the main context before SDL_Quit.
             settingsWindow.reset();debuggerWindow.reset();
             windowCheck(ImGui::GetCurrentContext()==mainContext,"destroying tools corrupted main context");
-            std::cout<<"SDL windows: separate Settings/Debugger, framebuffer/resize, isolated input, F10/F12, Apply/reset, close/reopen and cleanup verified\n";
+            std::remove((smokeSdRoot+"/not-a-folder").c_str());std::remove((smokeSdRoot+"/__BLOADER.BAS").c_str());std::remove(smokeSdRoot.c_str());
+            std::cout<<"SDL windows: separate Settings/Debugger, input, resize, SD folder browse/apply/validation, close/reopen and cleanup verified\n";
             break;
         }
     }
@@ -636,8 +710,16 @@ public:
         SDL_SetMainReady();if(SDL_Init(SDL_INIT_VIDEO|SDL_INIT_AUDIO|SDL_INIT_TIMER))throw std::runtime_error(SDL_GetError());
         char* dir=(options.portable||options.smoke)?SDL_GetBasePath():SDL_GetPrefPath("omikron88","IQ151-cpp");
         if(!dir)throw std::runtime_error(SDL_GetError());prefs.dir=dir;SDL_free(dir);
-        prefs.config=options.config;if(!options.smoke&&!options.configExplicit)prefs.load();
-        machine.reset(new Machine(prefs.config,options.sdRoot=="SDRoot"?prefs.dir+"/SDRoot":options.sdRoot));auto& m=*machine;
+        prefs.config=options.config;
+        if(!options.smoke) {
+            prefs.load();
+            if(options.configExplicit) {
+                std::string savedRoot=prefs.config.sdRoot;
+                prefs.config=options.config;prefs.config.sdRoot=savedRoot;
+            }
+        }
+        prefs.config.sdRoot=prefs.sdRootFor(options.sdRoot);
+        machine.reset(new Machine(prefs.config));auto& m=*machine;
         loadAddress=options.address;
         if(!options.snapshot.empty())m.loadSnapshot(options.snapshot);if(!options.input.empty())openPath(options.input);
         if(!options.tape.empty())m.tape.open(options.tape);

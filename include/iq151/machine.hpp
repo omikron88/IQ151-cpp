@@ -16,6 +16,7 @@ struct Config {
     bool mem64 = false, grafik = true, sdrom = false, disc2 = false;
     bool audio = false, smartkeyboard = false, v64ena32 = false;
     bool sdAutorun = false, felAutorun = false, amosAutorun = false;
+    std::string sdRoot; // Host folder; deliberately not part of Java ISN hardware configuration.
     std::array<uint8_t,10> bytes() const;
 };
 class Memory {
@@ -170,7 +171,7 @@ public:
     bool paused=false;
     int memoryBreakpoint=-1;
     std::vector<int16_t> audio;
-    explicit Machine(const Config& c=Config(),const std::string& sdRoot="SDRoot");
+    explicit Machine(const Config& c=Config(),const std::string& sdRoot="");
     void reset(bool dirty=false);
     void step();
     void frame();

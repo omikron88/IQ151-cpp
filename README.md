@@ -88,7 +88,19 @@ kazet/disket jsou uživatelská data, nikoli ROM, a zůstávají externí.
 Přepínač `--portable` ukládá nastavení, rychlý slot a výchozí `SDRoot` vedle
 binárky; tento adresář musí být zapisovatelný. Bez něj se používá uživatelský
 adresář vrácený `SDL_GetPrefPath`. Při zapnutí SD-ROM se do jeho kořene bezpečně
-vytvoří chybějící `__BLOADER.BAS`. `--sd-root DIR` umožní zvolit jiný kořen.
+vytvoří chybějící `__BLOADER.BAS`.
+
+V **Settings → SD-ROM folder** lze cestu napsat nebo vybrat tlačítkem **Browse...**.
+V prohlížeči vyberte adresář a potvrďte **Use this folder**; **Apply and reset**
+uloží cestu do `iq151.ini` a přepne SD-ROM na nový obsah. Změna se zachová po
+restartu. **Default** obnoví výchozí `SDRoot`. Neplatná cesta (např. soubor místo
+adresáře) zobrazí chybu v Settings a nezmění běžící stroj. Nový adresář lze vytvořit
+zadáním cesty, pokud už existuje jeho nadřazená složka.
+
+Přepínač `--sd-root DIR` má před uloženou cestou přednost, i při použití dalších
+přepínačů hardwaru. Cesty s mezerami se ukládají celé, bez uvozovek. Například
+řádek v `iq151.ini`: `sdRoot C:\IQ151 data\SDRoot`. Headless režim nadále používá
+`--sd-root`, případně `SDRoot` v aktuálním adresáři.
 
 ```sh
 cmake --install build-static --prefix package
@@ -173,7 +185,8 @@ CTest ověřuje:
   BASICu a uložení přes 8255;
 - vykreslení SDL okna a vykonání `PRINT` z fyzické i chytré SDL klávesnice;
 - samostatná okna Settings/debuggeru, jejich renderery, změnu velikosti,
-  oddělený vstup, F10/F12, Apply/reset, zavření/opětovné otevření a uvolnění
+  oddělený vstup, F10/F12, výběr/použití složky SD-ROM, odmítnutí neplatné cesty,
+  Apply/reset, zavření/opětovné otevření a uvolnění
   kontextů; test lze spustit také s X11 backendem.
 
 JDK je potřeba pouze k přegenerování referencí, nikoli pro běžné testy:

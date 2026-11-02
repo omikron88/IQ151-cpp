@@ -16,8 +16,14 @@ Python, Java, a ROM path nor an archive library is needed by the binary.
 * `sdrom.cpp`: deterministic state machine in place of Java's ATmega threads;
   the same 8255 ports and handshake are used by the original embedded loader.
   Filesystem work is local; nothing is sent over the network at runtime.
+* `preferences.cpp`: backward-compatible line-based `iq151.ini` parsing;
+  `Config::sdRoot` preserves host paths with spaces/backslashes. GUI startup uses
+  CLI `--sd-root`, then the saved path, then the default preference/portable
+  `SDRoot`. Hardware CLI overrides retain this host setting. Machine reset picks
+  up a changed Config path. The folder browser runs in the Settings ImGui context.
 * `snapshot.cpp`: Java ISN v1 layout. Length/configuration/enum validation precedes
-  state changes. Peripheral transactions and mounted files are not snapshots.
+  state changes. Peripheral transactions, mounted files and the host SD folder
+  are not snapshots; the original 10-byte hardware config block is unchanged.
 * `frontend.cpp`: SDL window/events/audio, original icons, menus, dialogs,
   debugger, preferences and file browser. Input/focus loss releases held keys.
 * `ui_window.cpp`: independent, non-modal SDL Settings/debugger windows with

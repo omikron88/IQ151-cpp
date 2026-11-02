@@ -111,14 +111,16 @@ bool Keyboard::decode(char c,int& r,int& b,bool& shifted) {
 }
 bool Keyboard::character(char c) { int r,b;bool sh;if(!decode(c,r,b,sh)) return false; key(r,b,true);shift=sh;return true; }
 Machine::Machine(const Config& c,const std::string& root)
-    : config(c),cpu(clock,*this,*this),memory(config),pic(cpu),pio(*this),sd(root) { reset(true); }
+    : config(c),cpu(clock,*this,*this),memory(config),pic(cpu),pio(*this),sd(root.empty()?(config.sdRoot.empty()?"SDRoot":config.sdRoot):root) { config.sdRoot=sd.root;reset(true); }
 void Machine::reset(bool dirty) {
     if(config.main<0||config.main>3||config.monitor<10||config.monitor>13||config.video<0||config.video>1)
         throw std::runtime_error("Invalid machine configuration");
     memory.reset(dirty); memory.setBootstrap(true); clock.reset(); nextHalf=1024;
     pic.reset(); cpu.reset(); pio.Reset(); keyboard.reset();
     port80=0;khz1=tapein=tapeo=tapeout=tapestart=false;
-    grafik=Grafik(); floppy.reset(); if(config.sdrom) sd.reset();
+    grafik=Grafik(); floppy.reset();
+    sd.root=config.sdRoot.empty()?"SDRoot":config.sdRoot;
+    if(config.sdrom) sd.reset();
     cancelPaste(); audio.clear();audioPhase=0;autoPending=true;
 }
 int Machine::fetchOpcode(int a) { clock.addTstates(4);return cpu.isIntAck()?pic.ack():memory.read(a); }

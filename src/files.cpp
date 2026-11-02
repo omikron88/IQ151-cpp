@@ -62,7 +62,10 @@ std::string sdPath(const std::string& root,const std::string& request) {
     std::replace(check.begin(),check.end(),'\\','/');std::replace(prefix.begin(),prefix.end(),'\\','/');
     std::transform(check.begin(),check.end(),check.begin(),::tolower);std::transform(prefix.begin(),prefix.end(),prefix.begin(),::tolower);
 #endif
-    if(check!=prefix&&(check.size()<=prefix.size()||check.compare(0,prefix.size(),prefix)!=0||check[prefix.size()]!='/'))
+    bool same=check==prefix;
+    // A selected filesystem root already ends in '/', e.g. / or C:/.
+    if(!prefix.empty()&&prefix.back()!='/')prefix+='/';
+    if(!same&&check.compare(0,prefix.size(),prefix)!=0)
         throw std::runtime_error("SD-ROM path escapes its root");
     return candidate;
 }
